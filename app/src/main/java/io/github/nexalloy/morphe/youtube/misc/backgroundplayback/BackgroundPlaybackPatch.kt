@@ -17,6 +17,7 @@ import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_21_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_23_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_36_or_greater
 import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_42_or_greater
+import io.github.nexalloy.morphe.youtube.misc.playservice.is_21_46_or_greater
 import io.github.nexalloy.morphe.youtube.misc.settings.PreferenceScreen
 import io.github.nexalloy.morphe.youtube.video.information.onCreateHook
 import io.github.nexalloy.patch
@@ -93,7 +94,12 @@ val BackgroundPlayback = patch(
     insertLiteralOverride(45415425, true)
 
     // Force allowing background play for videos labeled for kids.
-    KidsBackgroundPlaybackPolicyControllerFingerprint.hookMethod(returnConstant(Unit))
+    // 21.46.522: the policy-controller method could not be located in this
+    // release (removed/refactored by Google); the fingerprint is gated to
+    // <=21.45.999, so skip the hook on 21.46+.
+    if (!is_21_46_or_greater) {
+        KidsBackgroundPlaybackPolicyControllerFingerprint.hookMethod(returnConstant(Unit))
+    }
 
     // Fix PiP buttons not working after locking/unlocking device screen.
     if (!is_21_21_or_greater) {

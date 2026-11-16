@@ -77,6 +77,9 @@ class ApkContext(apkPath: String) : Closeable {
             EnumSet.of(AppAttribute.VERSION_NAME),
             JadxSecurity(JadxSecurityFlag.none())
         )
-        return AppVersion(manifest.parse().versionName!!.removeSuffix("-SECONDARY"))
+        // Local test fix (2026-11-16): beta builds report versionName like
+        // "21.46.522-BETA", which AppVersion rejects (numbers and dots only).
+        // Strip any "-..." suffix so the fingerprint test can run on them.
+        return AppVersion(manifest.parse().versionName!!.removeSuffix("-SECONDARY").substringBefore("-"))
     }
 }

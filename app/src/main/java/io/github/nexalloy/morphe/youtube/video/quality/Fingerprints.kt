@@ -25,6 +25,8 @@ import io.github.nexalloy.morphe.resourceLiteral
 import io.github.nexalloy.morphe.resourceMappings
 import io.github.nexalloy.morphe.returns
 import io.github.nexalloy.morphe.string
+import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.result.ClassData
 
 internal const val CLIENT_ABR_STATE_CLASS =
     "Lcom/google/android/apps/youtube/proto/ClientAbrStateOuterClass\$ClientAbrState;"
@@ -294,14 +296,14 @@ internal object QualityFormatsFeatureFlagFingerprint : Fingerprint(
 @RequireAppVersion("21.17.000")
 @StrictQuery
 internal object PlaybackControllerSetVideoFormatsFingerprint : Fingerprint(
-    definingClass = "Lcom/google/android/libraries/youtube/media/player/exo2/platypus/PlaybackControllerWrapper;",
+    // 21.46.522: dropped definingClass (PlaybackControllerWrapper is
+    // obfuscated) and the PlaybackController interface type on the IGET_OBJECT.
     accessFlags = listOf(AccessFlags.FINAL),
     returnType = "Z",
     parameters = listOf("Z"),
     filters = listOf(
         fieldAccess(
-            opcode = Opcode.IGET_OBJECT,
-            type = "Lcom/google/android/libraries/youtube/media/interfaces/PlaybackController;"
+            opcode = Opcode.IGET_OBJECT
         ),
         opcode(Opcode.IF_NEZ, location = MatchAfterImmediately()),
         // The parameter, if the buffered video is cleared.
@@ -318,7 +320,8 @@ internal object PlaybackControllerSetVideoFormatsFingerprint : Fingerprint(
  */
 @RequireAppVersion("21.17.000")
 internal object AsyncMediaFetchControllerSetVideoFormatsFingerprint : Fingerprint(
-    definingClass = "Lcom/google/android/libraries/youtube/media/player/exo2/platypus/AsyncMediaFetchControllerWrapper;",
+    // 21.46.522: dropped definingClass (AsyncMediaFetchControllerWrapper is
+    // obfuscated); the literal 45779716 alone identifies this method.
     returnType = "V",
     parameters = listOf("L", "Z"),
     filters = listOf(
@@ -352,15 +355,15 @@ internal const val BUFFER_MANAGER_CLASS =
  */
 @RequireAppVersion("21.17.000")
 internal object PlaybackControllerClearBufferFingerprint : Fingerprint(
-    definingClass = "Lcom/google/android/libraries/youtube/media/player/exo2/platypus/PlaybackControllerWrapper;",
+    // 21.46.522: dropped definingClass (PlaybackControllerWrapper is
+    // obfuscated) and the BufferManagerImpl type on the IGET_OBJECT.
     returnType = "V",
     filters = listOf(
         // Stops the media requests.
         methodCall(definingClass = "this", returnType = "V", parameters = listOf()),
         fieldAccess(
             opcode = Opcode.IGET_OBJECT,
-            definingClass = "this",
-            type = BUFFER_MANAGER_CLASS
+            definingClass = "this"
         ),
         string("setStartTimeUs with disposed BufferManager")
     )
@@ -378,8 +381,10 @@ internal const val MEDIA_SEGMENT_HOLDER_CLASS =
 internal object MediaSegmentHolderDiscardBufferAfterSegmentFingerprint : Fingerprint(
     filters = listOf(
         string("discardBufferAfterCurrentSegment with disposed BufferManager"),
+        // DIAGNOSTIC 2026-11-16: dropped the MediaSegmentHolder definingClass
+        // (real class name is obfuscated in the APK) to test whether the
+        // class-name resolution is what breaks this fingerprint on 21.46.522.
         methodCall(
-            definingClass = MEDIA_SEGMENT_HOLDER_CLASS,
             returnType = "V",
             parameters = listOf("J")
         )
@@ -396,13 +401,20 @@ internal const val SAMPLE_HOLDER_CLASS =
 
 /**
  * The method of the buffer manager that returns the buffered media of a track.
+ *
+ * 21.46.522: the BufferManagerImpl/MediaSegmentHolder class names are
+ * obfuscated, so this is matched by the BufferManager superclass plus the
+ * ordinal() switch on the track type, which only getMediaSegmentHolder does.
  */
 @RequireAppVersion("21.17.000")
 internal object BufferManagerGetMediaSegmentHolderFingerprint : Fingerprint(
-    definingClass = BUFFER_MANAGER_CLASS,
+    superclass = "Lcom/google/android/libraries/youtube/media/interfaces/BufferManager;",
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
-    returnType = MEDIA_SEGMENT_HOLDER_CLASS,
-    parameters = listOf("L")
+    returnType = "L",
+    parameters = listOf("L"),
+    filters = listOf(
+        methodCall(name = "ordinal", returnType = "I", parameters = listOf())
+    )
 )
 
 /**
@@ -428,10 +440,62 @@ internal object SampleHolderDiscardBufferBeforeSegmentLegacyFingerprint : Finger
  *
  * Same as [SampleHolderDiscardBufferBeforeSegmentLegacyFingerprint],
  * with the parameters: time, playback time and size of the media kept before the playback time.
+ *
+ * The platypus class names are obfuscated since 21.46.522, so the holder
+ * classes are resolved at runtime from BufferManagerImpl instead of being
+ * hardcoded: BufferManagerImpl is the only subclass of the BufferManager
+ * interface, and its factory methods return the holder classes.
  */
-@RequireAppVersion("21.43.000")
-internal object SampleHolderDiscardBufferBeforeSegmentFingerprint : Fingerprint(
-    definingClass = SAMPLE_HOLDER_CLASS,
+context(dexkit: DexKitBridge)
+private fun bufferManagerImplClass(): ClassData =
+    BufferManagerGetMediaSegmentHolderFingerprint().declaredClass!!
+
+context(dexkit: DexKitBridge)
+private fun mediaHolderFactoryMethods() =
+    // BufferManagerImpl methods taking one object argument (the track):
+    // k -> FormatInitializationMetadata, l -> MediaSegmentHolder,
+    // m -> SampleHolder (21.46.522 terms).
+    Fingerprint(
+        definingClass = bufferManagerImplClass().descriptor,
+        returnType = "L",
+        parameters = listOf("L")
+    ).matchAll().map { it.method }
+
+context(dexkit: DexKitBridge)
+private fun mediaSegmentHolderClass(): ClassData =
+    // The only factory return type whose superclass is Object
+    // (FormatInitializationMetadata extends GeneratedMessageLite,
+    // SampleHolder extends MediaSegmentHolder).
+    mediaHolderFactoryMethods().single {
+        it.returnType?.superClass?.descriptor == "Ljava/lang/Object;"
+    }.returnType!!
+
+context(dexkit: DexKitBridge)
+private fun sampleHolderClass(): ClassData =
+    // The only factory return type that extends MediaSegmentHolder.
+    mediaHolderFactoryMethods().single {
+        it.returnType?.superClass?.descriptor == mediaSegmentHolderClass().descriptor
+    }.returnType!!
+
+context(dexkit: DexKitBridge)
+private fun mediaPushMediaSourceClass(): ClassData =
+    // The only constructor that takes the BufferManagerImpl plus a Handler:
+    // (any, BufferManagerImpl, Handler, any, any).
+    Fingerprint(
+        name = "<init>",
+        returnType = "V",
+        parameters = listOf(
+            "L",
+            bufferManagerImplClass().descriptor,
+            "Landroid/os/Handler;",
+            "L",
+            "L"
+        )
+    )().declaredClass!!
+
+context(dexkit: DexKitBridge)
+private fun sampleHolderDiscardBufferBeforeSegmentFingerprint() = Fingerprint(
+    definingClass = sampleHolderClass().descriptor,
     returnType = "V",
     parameters = listOf("J", "J", "J"),
     filters = listOf(
@@ -440,19 +504,23 @@ internal object SampleHolderDiscardBufferBeforeSegmentFingerprint : Fingerprint(
     )
 )
 
+@get:RequireAppVersion("21.43.000")
+internal val sampleHolderDiscardBufferBeforeSegmentMethod = findMethodDirect {
+    sampleHolderDiscardBufferBeforeSegmentFingerprint()()
+}
+
 /**
  * The method of the buffered media of a track that saves the end time of its first segment.
  * The media before a time is cleared only if the time is after it.
  */
-@RequireAppVersion("21.17.000")
-internal object MediaSegmentHolderSetFirstSegmentEndTimeFingerprint : Fingerprint(
-    definingClass = MEDIA_SEGMENT_HOLDER_CLASS,
+context(dexkit: DexKitBridge)
+private fun mediaSegmentHolderSetFirstSegmentEndTimeFingerprint() = Fingerprint(
+    definingClass = mediaSegmentHolderClass().descriptor,
     returnType = "V",
     parameters = listOf(),
     filters = listOf(
         methodCall(smali = "Ljava/util/List;->isEmpty()Z"),
         methodCall(
-            definingClass = "Lcom/google/android/libraries/youtube/media/player/exo2/platypus/mediapush/BufferedMediaSegment;",
             returnType = "J",
             parameters = listOf()
         ),
@@ -460,24 +528,39 @@ internal object MediaSegmentHolderSetFirstSegmentEndTimeFingerprint : Fingerprin
     )
 )
 
+@get:RequireAppVersion("21.17.000")
+internal val mediaSegmentHolderSetFirstSegmentEndTimeMethod = findMethodDirect {
+    mediaSegmentHolderSetFirstSegmentEndTimeFingerprint()()
+}
+
 /**
  * The method of the media source that clears the media buffered before the playback time,
  * called by the player while the video is loaded.
  */
-@RequireAppVersion("21.17.000")
-internal object MediaPushMediaSourceDiscardBufferFingerprint : Fingerprint(
-    definingClass = "Lcom/google/android/libraries/youtube/media/player/exo2/platypus/mediapush/MediaPushMediaSource;",
+context(dexkit: DexKitBridge)
+private fun mediaPushMediaSourceDiscardBufferFingerprint() = Fingerprint(
+    definingClass = mediaPushMediaSourceClass().descriptor,
     returnType = "V",
     parameters = listOf("J"),
     filters = listOf(
+        opcode(Opcode.SGET_WIDE),
+        // The BufferManager field, typed with the runtime-resolved
+        // BufferManagerImpl descriptor. Pinning the type keeps
+        // instructionMatches[1] on this field, which
+        // mediaSourceBufferManagerField and mediaSourcePrepareDiscardMethod read.
         fieldAccess(
-            opcode = Opcode.SGET_WIDE,
-            definingClass = "Lcom/google/android/libraries/youtube/media/player/exo2/platypus/live/LiveTimeline;"
+            opcode = Opcode.IGET_OBJECT,
+            definingClass = "this",
+            type = bufferManagerImplClass().descriptor
         ),
-        fieldAccess(opcode = Opcode.IGET_OBJECT, definingClass = "this", type = BUFFER_MANAGER_CLASS),
         methodCall(smali = "Ljava/lang/Math;->max(JJ)J")
     )
 )
+
+@get:RequireAppVersion("21.17.000")
+internal val mediaPushMediaSourceDiscardBufferMethod = findMethodDirect {
+    mediaPushMediaSourceDiscardBufferFingerprint()()
+}
 
 
 internal val playbackStartInitialResolutionMethod = findMethodDirect {
@@ -575,17 +658,17 @@ internal val playbackBufferManagerField = findFieldDirect {
 
 @get:RequireAppVersion("21.17.000")
 internal val firstSegmentEndTimeField = findFieldDirect {
-    MediaSegmentHolderSetFirstSegmentEndTimeFingerprint.instructionMatches.last().instruction.fieldRef!!
+    mediaSegmentHolderSetFirstSegmentEndTimeFingerprint().instructionMatches.last().instruction.fieldRef!!
 }
 
 @get:RequireAppVersion("21.17.000")
 internal val mediaSourceBufferManagerField = findFieldDirect {
-    MediaPushMediaSourceDiscardBufferFingerprint.instructionMatches[1].instruction.fieldRef!!
+    mediaPushMediaSourceDiscardBufferFingerprint().instructionMatches[1].instruction.fieldRef!!
 }
 
 @get:RequireAppVersion("21.17.000")
 internal val mediaSourcePrepareDiscardMethod = findMethodDirect {
-    val match = MediaPushMediaSourceDiscardBufferFingerprint.match()
+    val match = mediaPushMediaSourceDiscardBufferFingerprint().match()
     match.method.instructions.take(match.instructionMatches[1].index).last {
         it.methodRef?.declaredClass == match.method.declaredClass &&
             it.methodRef?.paramTypes?.map { p -> p.descriptor } == listOf("J") &&

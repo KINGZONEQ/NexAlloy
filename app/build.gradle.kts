@@ -25,7 +25,7 @@ android {
     namespace = "io.github.nexalloy"
 
     defaultConfig {
-        applicationId = "io.github.chsbuffer.revancedxposed"
+        applicationId = "io.github.chsbuffer.revancedxposed.hideads"
         versionCode = 112
         versionName = "2.0.$versionCode"
         val patchVersion = Properties().apply {

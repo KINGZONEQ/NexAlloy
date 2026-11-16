@@ -222,7 +222,7 @@ val RememberVideoQuality = patch {
         val discardAfter = ::mediaSegmentHolderDiscardBufferAfterSegmentMethod.method
         val getMedia = BufferManagerGetMediaSegmentHolderFingerprint.method
         val firstEnd = ::firstSegmentEndTimeField.field
-        val discardBefore = if (is_21_43_or_greater) SampleHolderDiscardBufferBeforeSegmentFingerprint.method
+        val discardBefore = if (is_21_43_or_greater) ::sampleHolderDiscardBufferBeforeSegmentMethod.method
             else SampleHolderDiscardBufferBeforeSegmentLegacyFingerprint.method
         fun discardBeforeSegment(media: Any, time: Long): Boolean {
             val before = firstEnd.getLong(media)
@@ -246,7 +246,7 @@ val RememberVideoQuality = patch {
 
         // The inner call is reached only after the media source's live-stream time checks.
         val sourceManager = ::mediaSourceBufferManagerField.field
-        MediaPushMediaSourceDiscardBufferFingerprint.hookMethod(scopedHook(::mediaSourcePrepareDiscardMethod.method) {
+        ::mediaPushMediaSourceDiscardBufferMethod.hookMethod(scopedHook(::mediaSourcePrepareDiscardMethod.method) {
             after {
                 if (innerDepth == 0 && !it.hasThrowable() && it.thisObject === outerParam.thisObject &&
                     RememberVideoQualityPatch.shouldClearPlayedVideoSegment()) {

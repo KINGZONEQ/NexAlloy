@@ -13,7 +13,8 @@ import io.github.nexalloy.morphe.opcode
 
 internal object PageBottomMarginFingerprint : Fingerprint(
     returnType = "V",
-    parameters = listOf("Landroid/graphics/Rect;"),
+    // 21.46.522 added a boolean parameter (keyboard-visible flag).
+    parameters = listOf("Landroid/graphics/Rect;", "Z"),
     filters = listOf(
         methodCall(smali = "Landroid/view/View;->findFocus()Landroid/view/View;"),
         methodCall(
@@ -90,12 +91,14 @@ internal val pageBottomMarginConstructor = findMethodDirect {
 internal val pageKeyboardInsetsMethod = findMethodDirect {
     val match = PageBottomMarginFingerprint.match()
     val instructions = match.method.instructions
-    // Newer targets read the keyboard inset through a helper without calling getRootView.
-    // Both forms occur only on the keyboard branch, immediately before the Rect.bottom fallback.
+    // In 21.46 the keyboard-inset helper (a static method taking a View and
+    // returning the inset height as int) moved to the branch right after the
+    // Rect.bottom fallback, instead of sitting between onCheckIsTextEditor
+    // and Rect.bottom. Take the first such static call after Rect.bottom.
     instructions.subList(
-        match.instructionMatches[1].index + 1,
-        match.instructionMatches.last().index
-    ).last {
+        match.instructionMatches.last().index + 1,
+        instructions.size
+    ).first {
             it.opcode in listOf(Opcode.INVOKE_STATIC.opCode, Opcode.INVOKE_STATIC_RANGE.opCode) &&
                     it.methodRef?.paramTypes?.map { it.descriptor } == listOf("Landroid/view/View;")
         }.methodRef!!

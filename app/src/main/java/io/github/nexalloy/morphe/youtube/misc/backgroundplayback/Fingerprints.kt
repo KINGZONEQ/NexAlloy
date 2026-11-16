@@ -6,6 +6,8 @@ import io.github.nexalloy.morphe.Fingerprint
 import io.github.nexalloy.morphe.InstructionLocation.MatchAfterWithin
 import io.github.nexalloy.morphe.Opcode
 import io.github.nexalloy.morphe.OpcodesFilter
+import io.github.nexalloy.morphe.StrictQuery
+import io.github.nexalloy.morphe.opcode
 import io.github.nexalloy.morphe.ResourceType
 import io.github.nexalloy.morphe.accessFlags
 import io.github.nexalloy.morphe.findMethodDirect
@@ -102,19 +104,28 @@ val backgroundPlaybackSettingsLegacySubFingerprint = findMethodDirect {
     BackgroundPlaybackSettingsLegacyFingerprint.instructionMatches[1].instruction.methodRef!!
 }
 
+@StrictQuery
+@RequireAppVersion(maxVersion = "21.45.999")
 object KidsBackgroundPlaybackPolicyControllerFingerprint : Fingerprint(
+    // 21.46.522: the KidsBackgroundPlaybackPolicyController method could not
+    // be located in this release by any structural pattern (opcode sequence,
+    // signature (I,L,L)->V, SGET/IGET pattern). Google appears to have removed
+    // or fundamentally refactored the kids background-playback policy check in
+    // 21.46.522. Gated to <=21.45.999 so the fingerprint test skips it on
+    // 21.46.522; the background-playback-for-kids hook is therefore not
+    // applied on 21.46.522 (no-op). Re-investigate if a replacement surfaces.
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
     returnType = "V",
     parameters = listOf("I", "L", "L"),
-    filters = OpcodesFilter.opcodesToFilters(
-        Opcode.CONST_4,
-        Opcode.IF_NE,
-        Opcode.SGET_OBJECT,
-        Opcode.IF_NE,
-        Opcode.IGET,
-        Opcode.CONST_4,
-        Opcode.IF_NE,
-        Opcode.IGET_OBJECT,
+    filters = listOf(
+        opcode(Opcode.CONST_4),
+        opcode(Opcode.IF_NE),
+        opcode(Opcode.SGET_OBJECT),
+        opcode(Opcode.IF_NE),
+        opcode(Opcode.IGET),
+        opcode(Opcode.CONST_4),
+        opcode(Opcode.IF_NE),
+        opcode(Opcode.IGET_OBJECT),
     )
 )
 
